@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<link rel="manifest" href="./manifest.json" />
+<title>Fit Guide</title>
+<style>
+  @font-face {
+    font-family: 'Busan';
+    src: url('https://cdn.jsdelivr.net/korean-webfonts/1/orgs/govs/busan/Busan/Busan.woff2') format('woff2'),
+         url('https://cdn.jsdelivr.net/korean-webfonts/1/orgs/govs/busan/Busan/Busan.woff') format('woff');
+    font-weight: 400;
+    font-display: swap;
+  }
+
+  *, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0; padding: 0;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+  }
+
+  html, body {
+    width: 100%; height: 100%;
+    overflow: hidden;
+    background: #f8f7f5;
+    font-family: 'Busan', sans-serif;
+    touch-action: none;
+  }
+
+  /* ── 로딩 화면 ─────────────────────────────────────────────── */
+  #loading-screen {
+    position: fixed;
+    inset: 0;
+    background: #f8f7f5;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    transition: opacity 0.6s ease;
+  }
+  #loading-screen.hidden {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  #loading-title {
+    font-size: 14px;
+    letter-spacing: 0.2em;
+    color: #1a1a1a;
+    text-transform: uppercase;
+    margin-bottom: 30px;
+  }
+
+  #loading-bar-wrap {
+    width: 200px;
+    height: 2px;
+    background: rgba(0,0,0,0.08);
+    border-radius: 2px;
+    overflow: hidden;
+    margin-bottom: 12px;
+  }
+
+  #loading-bar {
+    height: 100%;
+    width: 0%;
+    background: #1a1a1a;
+    border-radius: 2px;
+    transition: width 0.3s ease;
+  }
+
+  #loading-percent {
+    font-size: 10px;
+    letter-spacing: 0.15em;
+    color: #999;
+  }
+
+  #loading-status {
+    font-size: 9px;
+    letter-spacing: 0.1em;
+    color: #bbb;
+    margin-top: 8px;
+  }
+
+  /* ── 전체 앱 ───────────────────────────────────────────────── */
+  #app {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #f8f7f5;
+  }
+
+  #video-wrap {
+    position: relative;
+    height: 100dvh;
+    width: calc(100dvh * (1600 / 2400));   /* 실제 영상 해상도 1600×2400 비율 */
+    max-width: 100vw;
+    max-height: calc(100vw * (2400 / 1600));
+    overflow: hidden;
+    background: #f8f7f5;
+  }
+
+  video {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center center;
+    display: block;
+    background: #f8f7f5;          /* 프레임 공백 시 검정 대신 배경색 */
+    /* ★ 안드로이드 WebView(Fully Kiosk) 검정화면 방지:
+       opacity 전환 + GPU 레이어 승격으로 영상 정상 렌더링 (이전에 동작하던 방식) */
+    opacity: 0;
+    transition: opacity 0.18s ease;
+    will-change: opacity;
+    transform: translateZ(0);
+    -webkit-transform: translateZ(0);
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+  }
+  video.show { opacity: 1; }
+
+  #autoplay-indicator {
+    position: absolute;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    opacity: 0;
+    transition: opacity 0.4s ease;
+    pointer-events: none;
+  }
+  #autoplay-indicator.visible { opacity: 1; }
+
+  #autoplay-dot {
+    width: 4px; height: 4px;
+    border-radius: 50%;
+    background: #1a1a1a;
+    animation: pulse-dot 2s ease-in-out infinite;
+  }
+
+  @keyframes pulse-dot {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50%       { opacity: 0.3; transform: scale(0.6); }
+  }
+
+  #autoplay-label {
+    font-size: 8px;
+    letter-spacing: 0.24em;
+    color: #555;
+    text-transform: uppercase;
+  }
+
+  #progress-dots { display: none; }
+
+  .dot {
+    width: 3px; height: 3px;
+    border-radius: 50%;
+    background: rgba(0,0,0,0.15);
+    transition: background 0.3s ease, transform 0.3s ease;
+  }
+  .dot.active {
+    background: #1a1a1a;
+    transform: scale(1.6);
+  }
+
+  /* ── 핏 버튼 (오른쪽 세로 스택) ────────────────────────────────
+     모든 치수는 영상 원본(1600×2400) 실측값의 비율로 잡는다.
+       · 하단 핏 수치 카드   : x 1084→1485 (w 401), top 1450
+       · 상단 핏 명 하단     : y 320
+     --H = #video-wrap 실제 높이(px). 태블릿에서 영상이 레터박스로
+     놓여도(뷰포트 ≠ 영상 영역) 버튼이 영상에 정확히 붙도록 JS가 채워 넣는다.
+     JS 실행 전에는 100dvh로 폴백. */
+  :root { --H: 100dvh; }
+
+  #sidebar {
+    position: absolute;
+    top: 16.5417%;                      /* 397 : 핏명 하단(298)에서 99 ↓, 마지막 버튼↔카드(1450)도 99 */
+    right: 7.21875%;                    /* 카드 오른쪽 끝(1484.5)에 정렬 — JS가 정수 px로 재보정 */
+    width: 25.125%;                     /* 카드 가로폭(402)과 동일 */
+    z-index: 20;
+    display: flex;
+    flex-direction: column;
+    gap: calc(var(--H) * 0.0291667);    /* 70 : UNI 그룹 ↔ WOMEN 그룹 */
+  }
+
+  .fit-group {
+    display: flex;
+    flex-direction: column;
+    gap: calc(var(--H) * 0.0075);       /* 18 : 헤더/버튼, 버튼 사이 */
+  }
+
+  /* 그룹 헤더: 라벨 + 버튼 폭 끝까지 이어지는 가로선 */
+  .group-head {
+    display: flex;
+    align-items: center;
+    gap: calc(var(--H) * 0.0045);
+    height: calc(var(--H) * 0.0141667); /* 34 */
+  }
+
+  .group-name {
+    font-size: calc(var(--H) * 0.0125);
+    letter-spacing: 0.1em;
+    color: #1a1a1a;
+    text-transform: uppercase;
+    font-weight: 700;
+    line-height: 1;
+    white-space: nowrap;
+  }
+
+  .group-rule {
+    flex: 1;
+    height: 1.5px;
+    background: rgba(0,0,0,0.18);
+  }
+
+  .fit-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;            /* 핏 명 가운데 정렬 */
+    width: 100%;
+    height: calc(var(--H) * 0.0491667); /* 118 */
+    padding: 0 calc(var(--H) * 0.0155);
+    background: #ffffff;
+    border: 1.5px solid #cccccc;        /* 기본: 연한 회색 테두리 */
+    border-radius: calc(var(--H) * 0.0058);
+    cursor: pointer;
+    transition: background 0.22s ease, border-color 0.22s ease, transform 0.15s ease;
+  }
+
+  /* 활성(자동 롤링 도달 / 선택): deep grey 배경 + 화이트 글씨 */
+  .fit-btn.active {
+    background: #5a5a5a;
+    border-color: #5a5a5a;
+  }
+
+  .fit-btn:active { transform: scale(0.97); }
+
+  .btn-index, .btn-group { display: none; }
+
+  .btn-label {
+    font-size: calc(var(--H) * 0.0133333);
+    letter-spacing: 0.08em;             /* 글자 붙어 보이던 것 완화 */
+    color: #b5b5b5;                     /* 기본: 연한 회색 글씨 */
+    text-transform: uppercase;
+    white-space: nowrap;
+    font-weight: 700;
+    line-height: 1.15;
+  }
+  .fit-btn.active .btn-label { color: #ffffff; }
+
+  /* ── AI 생성 콘텐츠 표기 (오른쪽 하단, 카드 오른쪽 끝에 정렬) ─── */
+  #ai-notice {
+    position: absolute;
+    right: 7.21875%;
+    bottom: 1.6%;
+    z-index: 20;
+    font-size: calc(var(--H) * 0.0095);
+    letter-spacing: 0.18em;
+    color: rgba(0,0,0,0.35);
+    text-transform: uppercase;
+    line-height: 1;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+
+<!-- 로딩 화면 -->
+<div id="loading-screen">
+  <div id="loading-title">Fit Guide</div>
+  <div id="loading-bar-wrap">
+    <div id="loading-bar"></div>
+  </div>
+  <div id="loading-percent">0%</div>
+  <div id="loading-status">preparing for offline use...</div>
+</div>
+
+<!-- 메인 앱 -->
+<div id="app" style="display:none;">
+  <div id="video-wrap">
+    <video id="main-video" autoplay muted playsinline webkit-playsinline preload="auto"></video>
+    <div id="autoplay-indicator">
+      <div id="autoplay-dot"></div>
+      <div id="autoplay-label">Auto</div>
+    </div>
+    <div id="progress-dots"></div>
+    <div id="sidebar"></div>
+    <div id="ai-notice">AI-GENERATED CONTENT</div>
+  </div>
+</div>
+
+<script>
+/* ================================================================
+   ★ 영상 파일 목록
+   ================================================================ */
+const FITS = [
+  { name: 'Wide',          path: './wide-uni.mp4'            , group: 'Uni'   },
+  { name: 'Curved Wide',   path: './curved-wide-uni.mp4'     , group: 'Uni'   },
+  { name: 'Semi Wide',     path: './semi-wide-women.mp4'     , group: 'Women' },
+  { name: 'Wide',          path: './wide-women.mp4'          , group: 'Women' },
+  { name: 'Feminine Wide', path: './feminine-wide-women.mp4' , group: 'Women' },
+  { name: 'Flare',         path: './flare-women.mp4'         , group: 'Women' },
+];
+
+const INACTIVITY_TIMEOUT_MS = 7000;
+
+let currentIndex    = 0;
+let isAutoplaying   = true;
+let inactivityTimer = null;
+
+/* 단일 영상 + 크림 오버레이로 전환 (저사양 태블릿 렉 방지) */
+const video       = document.getElementById('main-video');
+const dotsEl      = document.getElementById('progress-dots');
+const sidebar     = document.getElementById('sidebar');
+const autoInd     = document.getElementById('autoplay-indicator');
+
+/* ================================================================
+   ★ Service Worker 등록 + 캐싱 진행률 표시
+   ================================================================ */
+const loadingScreen  = document.getElementById('loading-screen');
+const loadingBar     = document.getElementById('loading-bar');
+const loadingPercent = document.getElementById('loading-percent');
+const loadingStatus  = document.getElementById('loading-status');
+const appEl          = document.getElementById('app');
+
+async function registerSW() {
+  if ('serviceWorker' in navigator) {
+    try {
+      await navigator.serviceWorker.register('./sw.js');
+    } catch (err) {
+      console.warn('SW 등록 실패:', err);
+    }
+  }
+  showApp();
+  prefetchVideos();   // 백그라운드로 나머지 영상 미리 캐싱 → 이후 전환 즉시
+}
+
+/* 첫 영상이 자리잡은 뒤, 나머지 영상을 순차적으로 미리 받아 SW 캐시에 저장.
+   한 번 받아두면 핏 전환 시 흰 화면/버퍼링 없이 즉시 재생됨. */
+function prefetchVideos() {
+  let i = 0;
+  const next = () => {
+    if (i >= FITS.length) return;
+    const path = FITS[i++].path;
+    fetch(path, { mode: 'cors', credentials: 'omit' })
+      .catch(() => {})
+      .finally(() => setTimeout(next, 400));
+  };
+  setTimeout(next, 1500);
+}
+
+function showApp() {
+  appEl.style.display = '';
+  loadingScreen.classList.add('hidden');
+  setTimeout(() => { loadingScreen.style.display = 'none'; }, 600);
+  init();
+}
+
+/* ================================================================
+   ★ 핏 가이드 로직 (기존과 동일)
+   ================================================================ */
+function buildUI() {
+  FITS.forEach((_, i) => {
+    const d = document.createElement('div');
+    d.className = 'dot' + (i === 0 ? ' active' : '');
+    dotsEl.appendChild(d);
+  });
+
+  /* 연속된 같은 group끼리 묶어 [헤더 + 버튼들] 섹션으로 렌더 */
+  const groups = [];
+  FITS.forEach((fit, i) => {
+    const last = groups[groups.length - 1];
+    if (last && last.name === fit.group) last.items.push({ fit, i });
+    else groups.push({ name: fit.group, items: [{ fit, i }] });
+  });
+
+  groups.forEach((g) => {
+    const sec = document.createElement('div');
+    sec.className = 'fit-group';
+
+    const head = document.createElement('div');
+    head.className = 'group-head';
+    head.innerHTML = `<span class="group-name">${g.name}</span><span class="group-rule"></span>`;
+    sec.appendChild(head);
+
+    g.items.forEach(({ fit, i }) => {
+      const btn = document.createElement('button');
+      btn.className = 'fit-btn' + (i === 0 ? ' active' : '');
+      btn.innerHTML = `<span class="btn-label">${fit.name}</span>`;
+      btn.addEventListener('pointerdown', () => onFitTapped(i));
+      sec.appendChild(btn);
+    });
+
+    sidebar.appendChild(sec);
+  });
+}
+
+/* 영상 영역(#video-wrap)의 실제 높이를 --H에 넣어, 레터박스 상황에서도
+   버튼 크기·간격이 영상 속 요소(핏 명, 수치 카드)와 정확히 맞도록 한다.
+   좌우 끝은 % 로 두면 소수점 폭이 반내림되어 카드보다 1px 좁아지므로,
+   카드 실측 위치(원본 1600px 기준 x 1082.5 → 1484.5)를 정수 px로 직접 지정한다. */
+const wrapEl   = document.getElementById('video-wrap');
+const aiNotice = document.getElementById('ai-notice');
+const CARD_L = 1082.5 / 1600;   /* 수치 카드 왼쪽 끝  */
+const CARD_R = 1484.5 / 1600;   /* 수치 카드 오른쪽 끝 */
+
+function syncScale() {
+  const r = wrapEl.getBoundingClientRect();
+  if (r.height > 0) document.documentElement.style.setProperty('--H', r.height + 'px');
+  if (r.width > 0) {
+    const left  = Math.round(r.width * CARD_L);
+    const right = Math.round(r.width * (1 - CARD_R));
+    sidebar.style.left  = left + 'px';
+    sidebar.style.right = right + 'px';
+    sidebar.style.width = 'auto';       /* left+right 로 폭 확정 → 반올림 오차 없음 */
+    aiNotice.style.right = right + 'px';
+  }
+}
+window.addEventListener('resize', syncScale);
+window.addEventListener('orientationchange', () => setTimeout(syncScale, 250));
+if (window.ResizeObserver) new ResizeObserver(syncScale).observe(wrapEl);
+
+/* Fully Kiosk(WebView) 대비: 재생이 막히면 가능 시점에 재시도 */
+function playVideo() {
+  const p = video.play();
+  if (p && typeof p.catch === 'function') {
+    p.catch(() => {
+      video.addEventListener('canplay', function once() {
+        video.removeEventListener('canplay', once);
+        video.play();
+      }, { once: true });
+    });
+  }
+}
+
+/* 자동재생 시 현재 영상이 끝나면 다음 핏으로 */
+function setEndedHandler() {
+  video.onended = isAutoplaying
+    ? () => { if (isAutoplaying) switchTo((currentIndex + 1) % FITS.length); }
+    : null;
+}
+
+let switchToken = 0;
+
+/* 단일 영상의 opacity로 전환:
+   현재 영상을 페이드아웃(크림 배경 노출) → src 교체 → 첫 프레임 준비되면
+   페이드인하며 버튼 색도 동시에 갱신.
+   opacity 애니메이션이 WebView에서 영상 정상 렌더링을 보장(검정화면 방지). */
+function switchTo(index, immediate) {
+  if (index === currentIndex && video.src && !immediate) return;
+  currentIndex = index;
+
+  const token = ++switchToken;   // 빠른 연속 탭 시 이전 전환 무시
+
+  const loadAndShow = () => {
+    if (token !== switchToken) return;
+    video.src = FITS[index].path;
+    video.load();
+    let done = false;
+    const reveal = () => {
+      if (done || token !== switchToken) return;
+      done = true;
+      video.removeEventListener('loadeddata', reveal);
+      video.removeEventListener('canplay', reveal);
+      updateUI();                 // 버튼 색 = 영상 등장과 동시(0.22s)
+      video.classList.add('show');
+      setEndedHandler();
+    };
+    video.addEventListener('loadeddata', reveal);
+    video.addEventListener('canplay', reveal);
+    setTimeout(reveal, 600);      // 이벤트 누락 대비 안전장치
+    playVideo();
+  };
+
+  if (immediate) { loadAndShow(); return; }
+
+  video.classList.remove('show'); // 현재 영상 페이드아웃(0.18s)
+  setTimeout(loadAndShow, 120);
+}
+
+function updateUI() {
+  document.querySelectorAll('.fit-btn').forEach((btn, i) => btn.classList.toggle('active', i === currentIndex));
+  document.querySelectorAll('.dot').forEach((dot, i) => dot.classList.toggle('active', i === currentIndex));
+  autoInd.classList.toggle('visible', isAutoplaying);
+}
+
+function startAutoplay() {
+  isAutoplaying = true;
+  updateUI();
+  setEndedHandler();
+}
+
+function pauseAutoplay() {
+  isAutoplaying = false;
+  setEndedHandler();
+  updateUI();
+}
+
+function resetInactivityTimer() {
+  clearTimeout(inactivityTimer);
+  inactivityTimer = setTimeout(startAutoplay, INACTIVITY_TIMEOUT_MS);
+}
+
+function onFitTapped(index) {
+  pauseAutoplay();
+  resetInactivityTimer();
+  switchTo(index);
+}
+
+/* ── 자동 복구 ───────────────────────────────────────────────────
+   영상 로드/재생에 실패하면(깨진 캐시 등), 서비스 워커에 그 영상 캐시를
+   버리라고 알리고 다시 받아 재생한다. 사람이 손대지 않아도 스스로 회복.
+   계속 실패하면 멈추지 않도록 다음 핏으로 넘어간다. */
+let recoverTries = 0;
+video.addEventListener('error', () => {
+  const badUrl = video.currentSrc || video.src;
+  if (!badUrl) return;
+  if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+    navigator.serviceWorker.controller.postMessage({ type: 'PURGE', url: badUrl });
+  }
+  if (recoverTries < 3) {
+    recoverTries++;
+    setTimeout(() => { video.load(); playVideo(); }, 1000);  // 캐시 삭제 반영 후 재시도
+  } else {
+    recoverTries = 0;
+    switchTo((currentIndex + 1) % FITS.length, true);        // 그래도 안 되면 다음 핏으로
+  }
+});
+video.addEventListener('loadeddata', () => { recoverTries = 0; });  // 정상 재생되면 리셋
+
+function init() {
+  syncScale();
+  buildUI();
+  currentIndex = 0;
+  switchTo(0, true);   // 첫 핏 로드 + 페이드인
+  startAutoplay();
+}
+
+/* ── 시작 ──────────────────────────────────────────────────────── */
+registerSW();
+</script>
+</body>
+</html>
