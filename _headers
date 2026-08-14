@@ -1,0 +1,35 @@
+# Cloudflare Pages 전용 응답 헤더 설정
+# 이 파일은 Cloudflare Pages 에서만 해석되며, 배포 산출물에는 포함되지 않는다.
+# GitHub Pages 는 이 파일을 무시하므로 기존 배포에 영향이 없다.
+
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+
+# 앱 셸 — sw.js 가 HTML 을 network-first 로 처리하므로 항상 재검증시킨다.
+/index.html
+  Cache-Control: no-cache
+
+# 서비스 워커 — 절대 캐시하지 않아야 갱신이 즉시 반영된다.
+/sw.js
+  Cache-Control: no-cache
+  Service-Worker-Allowed: /
+
+/manifest.json
+  Cache-Control: no-cache
+
+# 영상 — 파일명을 유지한 채 내용만 교체하는 워크플로이므로 매번 재검증한다.
+# (실제 오프라인 캐싱은 sw.js 의 Cache Storage 가 담당)
+/*.mp4
+  Cache-Control: public, max-age=0, must-revalidate
+
+# pages.dev 도메인은 색인에서 제외 — github.io 와 중복 색인 방지.
+# placeholder 는 호스트에서 점(.)을 넘지 못하므로 production 과 preview 를
+# 각각 따로 지정해야 한다. (Cloudflare 공식 예시와 동일한 2줄 구성)
+#   1) production : <project>.pages.dev
+#   2) preview    : <branch-or-hash>.<project>.pages.dev
+https://:project.pages.dev/*
+  X-Robots-Tag: noindex
+
+https://:version.:project.pages.dev/*
+  X-Robots-Tag: noindex

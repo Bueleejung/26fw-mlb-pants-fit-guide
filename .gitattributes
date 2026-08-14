@@ -1,0 +1,4 @@
+# Cloudflare Pages 설정 파일은 줄 단위로 파싱되므로 항상 LF 로 고정한다.
+# (Windows 작업본에서 CRLF 로 변환되면 헤더 값 끝에 CR 이 붙어 규칙이 깨진다)
+_headers   text eol=lf
+_redirects text eol=lf
